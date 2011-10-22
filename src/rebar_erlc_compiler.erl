@@ -123,7 +123,7 @@ doterl_compile(Config, OutDir) ->
 doterl_compile(Config, OutDir, MoreSources) ->
     FirstErls = rebar_config:get_list(Config, erl_first_files, []),
     ErlOpts = erl_opts(Config),
-    ?DEBUG("erl_opts ~p~n", [ErlOpts]),
+    ?CONSOLE("erl_opts ~p~n", [ErlOpts]),
     %% Support the src_dirs option allowing multiple directories to
     %% contain erlang source. This might be used, for example, should
     %% eunit tests be separated from the core application source.
@@ -168,12 +168,34 @@ erl_opts(Config) ->
     RawErlOpts = filter_defines(rebar_config:get(Config, erl_opts, []), []),
     GlobalDefines = [{d, list_to_atom(D)} ||
                         D <- rebar_config:get_global(defines, [])],
-    Opts = GlobalDefines ++ RawErlOpts,
+    Opts = GlobalDefines ++ global_erl_opts() ++ RawErlOpts,
     case proplists:is_defined(no_debug_info, Opts) of
         true ->
             [O || O <- Opts, O =/= no_debug_info];
         false ->
             [debug_info|Opts]
+    end.
+
+global_erl_opts() ->
+    RawGlobalErlOpts = rebar_config:get_global(erl_opts, []),
+    ?CONSOLE("RawGlobalErlOpts: ~p~n", [RawGlobalErlOpts]),
+    global_erl_opts2(RawGlobalErlOpts).
+
+global_erl_opts2([]) ->
+    [];
+global_erl_opts2(RawGlobalErlOpts) ->
+    try
+        String = RawGlobalErlOpts++".",
+        ?CONSOLE("Parse string to tokens: ~p~n", [String]),
+        {ok, Tokens, 1} = erl_scan:string(String),
+        ?CONSOLE("Parse tokens to term~n", []),
+        {ok, Term} = erl_parse:parse_term(Tokens),
+        ?CONSOLE("GlobalErlOpts: ~p~n", [Term]),
+        Term
+    catch
+        _:Error ->
+            ?ABORT("Failed to parse erl_opts=~s~n~p~n",
+                   [RawGlobalErlOpts, Error])
     end.
 
 -spec include_path(Source::file:filename(),

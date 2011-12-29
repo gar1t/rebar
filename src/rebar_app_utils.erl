@@ -31,7 +31,8 @@
          app_src_to_app/1,
          app_name/1,
          app_applications/1,
-         app_vsn/1]).
+         app_vsn/1,
+         is_skipped_app/1]).
 
 -export([load_app_file/1]). % TEMPORARY
 
@@ -98,12 +99,33 @@ app_vsn(AppFile) ->
     case load_app_file(AppFile) of
         {ok, _, AppInfo} ->
             AppDir = filename:dirname(filename:dirname(AppFile)),
-            vcs_vsn(get_value(vsn, AppInfo, AppFile), AppDir);
+            rebar_utils:vcs_vsn(get_value(vsn, AppInfo, AppFile), AppDir);
         {error, Reason} ->
             ?ABORT("Failed to extract vsn from ~s: ~p\n",
                    [AppFile, Reason])
     end.
 
+is_skipped_app(AppFile) ->
+    ThisApp = app_name(AppFile),
+    %% Check for apps global parameter; this is a comma-delimited list
+    %% of apps on which we want to run commands
+    case get_apps() of
+        undefined ->
+            %% No apps parameter specified, check the skip_apps list..
+            case get_skip_apps() of
+                undefined ->
+                    %% No skip_apps list, run everything..
+                    false;
+                SkipApps ->
+                    TargetApps = [list_to_atom(A) ||
+                                     A <- string:tokens(SkipApps, ",")],
+                    is_skipped_app(ThisApp, TargetApps)
+            end;
+        Apps ->
+            %% run only selected apps
+            TargetApps = [list_to_atom(A) || A <- string:tokens(Apps, ",")],
+            is_selected_app(ThisApp, TargetApps)
+    end.
 
 %% ===================================================================
 %% Internal functions
@@ -134,57 +156,46 @@ get_value(Key, AppInfo, AppFile) ->
             Value
     end.
 
-vcs_vsn(Vcs, Dir) ->
-    case vcs_vsn_cmd(Vcs) of
-        {unknown, VsnString} ->
-            ?DEBUG("vcs_vsn: Unknown VCS atom in vsn field: ~p\n", [Vcs]),
-            VsnString;
-        {cmd, CmdString} ->
-            vcs_vsn_invoke(CmdString, Dir);
-        Cmd ->
-            %% If there is a valid VCS directory in the application directory,
-            %% use that version info
-            Extension = lists:concat([".", Vcs]),
-            case filelib:is_dir(filename:join(Dir, Extension)) of
-                true ->
-                    ?DEBUG("vcs_vsn: Primary vcs used for ~s\n", [Dir]),
-                    vcs_vsn_invoke(Cmd, Dir);
-                false ->
-                    %% No VCS directory found for the app. Depending on source
-                    %% tree structure, there may be one higher up, but that can
-                    %% yield unexpected results when used with deps. So, we
-                    %% fallback to searching for a priv/vsn.Vcs file.
-                    VsnFile = filename:join([Dir, "priv", "vsn" ++ Extension]),
-                    case file:read_file(VsnFile) of
-                        {ok, VsnBin} ->
-                            ?DEBUG("vcs_vsn: Read ~s from priv/vsn.~p\n",
-                                   [VsnBin, Vcs]),
-                            string:strip(binary_to_list(VsnBin), right, $\n);
-                        {error, enoent} ->
-                            ?DEBUG("vcs_vsn: Fallback to vcs for ~s\n", [Dir]),
-                            vcs_vsn_invoke(Cmd, Dir)
-                    end
-            end
+%% apps= for selecting apps
+is_selected_app(ThisApp, TargetApps) ->
+    case lists:member(ThisApp, TargetApps) of
+        false ->
+            {true, ThisApp};
+        true ->
+            false
     end.
 
-vcs_vsn_cmd(git) ->
-    %% Explicitly git-describe a committish to accommodate for projects
-    %% in subdirs which don't have a GIT_DIR. In that case we will
-    %% get a description of the last commit that touched the subdir.
-    case os:type() of
-        {win32,nt} ->
-            "FOR /F \"usebackq tokens=* delims=\" %i in "
-            "(`git log -n 1 \"--pretty=format:%h\" .`) do "
-            "@git describe --always --tags %i";
-        _ ->
-            "git describe --always --tags `git log -n 1 --pretty=format:%h .`"
-    end;
-vcs_vsn_cmd(hg)  -> "hg identify -i";
-vcs_vsn_cmd(bzr) -> "bzr revno";
-vcs_vsn_cmd(svn) -> "svnversion";
-vcs_vsn_cmd({cmd, _Cmd}=Custom) -> Custom;
-vcs_vsn_cmd(Version) -> {unknown, Version}.
+%% skip_apps= for filtering apps
+is_skipped_app(ThisApp, TargetApps) ->
+    case lists:member(ThisApp, TargetApps) of
+        false ->
+            false;
+        true ->
+            {true, ThisApp}
+    end.
 
-vcs_vsn_invoke(Cmd, Dir) ->
-    {ok, VsnString} = rebar_utils:sh(Cmd, [{cd, Dir}, {use_stdout, false}]),
-    string:strip(VsnString, right, $\n).
+get_apps() ->
+    get_global_cs_opt(app, apps).
+
+get_skip_apps() ->
+    get_global_cs_opt(skip_app, skip_apps).
+
+get_global_cs_opt(Old, New) ->
+    Apps = rebar_config:get_global(New, undefined),
+    case rebar_config:get_global(Old, undefined) of
+        undefined ->
+            case Apps of
+                undefined ->
+                    undefined;
+                Apps ->
+                    Apps
+            end;
+        App ->
+            rebar_utils:deprecated(Old, Old, New, "soon"),
+            case Apps of
+                undefined ->
+                    App;
+                Apps ->
+                    string:join([App, Apps], ",")
+            end
+    end.

@@ -379,7 +379,10 @@ download_source(AppDir, {svn, Url, Rev}) ->
     ok = filelib:ensure_dir(AppDir),
     rebar_utils:sh(?FMT("svn checkout -r ~s ~s ~s",
                         [Rev, Url, filename:basename(AppDir)]),
-                   [{cd, filename:dirname(AppDir)}]).
+                   [{cd, filename:dirname(AppDir)}]);
+download_source(AppDir, {dir, Dir}) ->
+    ok = filelib:ensure_dir(AppDir),
+    rebar_utils:sh(?FMT("cp -a ~s/ ~s", [Dir, AppDir]), []).
 
 update_source(Dep) ->
     %% It's possible when updating a source, that a given dep does not have a
@@ -420,8 +423,9 @@ update_source(AppDir, {svn, _Url, Rev}) ->
 update_source(AppDir, {hg, _Url, Rev}) ->
     rebar_utils:sh(?FMT("hg pull -u -r ~s", [Rev]), [{cd, AppDir}]);
 update_source(AppDir, {bzr, _Url, Rev}) ->
-    rebar_utils:sh(?FMT("bzr update -r ~s", [Rev]), [{cd, AppDir}]).
-
+    rebar_utils:sh(?FMT("bzr update -r ~s", [Rev]), [{cd, AppDir}]);
+update_source(AppDir, {dir, Dir}) ->
+    rebar_utils:sh(?FMT("cp -a ~s/ ~s", [Dir, AppDir]), []).
 
 
 %% ===================================================================
@@ -433,7 +437,7 @@ source_engine_avail(Source) ->
     source_engine_avail(Name, Source).
 
 source_engine_avail(Name, Source)
-  when Name == hg; Name == git; Name == svn; Name == bzr ->
+  when Name == hg; Name == git; Name == svn; Name == bzr; Name == dir ->
     case vcs_client_vsn(Name) >= required_vcs_client_vsn(Name) of
         true ->
             true;
@@ -457,7 +461,8 @@ vcs_client_vsn(Path, VsnArg, VsnRegex) ->
 required_vcs_client_vsn(hg)  -> {1, 1};
 required_vcs_client_vsn(git) -> {1, 5};
 required_vcs_client_vsn(bzr) -> {2, 0};
-required_vcs_client_vsn(svn) -> {1, 6}.
+required_vcs_client_vsn(svn) -> {1, 6};
+required_vcs_client_vsn(dir) -> {}.
 
 vcs_client_vsn(hg) ->
     vcs_client_vsn(rebar_utils:find_executable("hg"), " --version",
@@ -470,7 +475,9 @@ vcs_client_vsn(bzr) ->
                    "Bazaar \\(bzr\\) (\\d+).(\\d+)");
 vcs_client_vsn(svn) ->
     vcs_client_vsn(rebar_utils:find_executable("svn"), " --version",
-                   "svn, version (\\d+).(\\d+)").
+                   "svn, version (\\d+).(\\d+)");
+vcs_client_vsn(dir) -> {}.
+
 
 has_vcs_dir(git, Dir) ->
     filelib:is_dir(filename:join(Dir, ".git"));

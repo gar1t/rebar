@@ -96,6 +96,9 @@ run_aux(Commands) ->
     %% Initialize logging system
     rebar_log:init(),
 
+    %% Initialize vsn cache
+    _VsnCacheTab = ets:new(rebar_vsn_cache,[named_table, public]),
+
     %% Convert command strings to atoms
     CommandAtoms = [list_to_atom(C) || C <- Commands],
 
@@ -156,7 +159,7 @@ parse_args(Args) ->
                                     proplists:get_bool(profile, Options)),
 
             %% Set global variables based on getopt options
-            set_global_flag(Options, verbose),
+            set_log_level(Options),
             set_global_flag(Options, force),
             DefJobs = rebar_config:get_jobs(),
             case proplists:get_value(jobs, Options, DefJobs) of
@@ -181,6 +184,18 @@ parse_args(Args) ->
             help(),
             halt(1)
     end.
+
+%%
+%% set log level based on getopt option
+%%
+set_log_level(Options) ->
+    LogLevel = case proplists:get_all_values(verbose, Options) of
+                   [] ->
+                       rebar_log:default_level();
+                   Verbosities ->
+                       lists:last(Verbosities)
+               end,
+    rebar_config:set_global(verbose, LogLevel).
 
 %%
 %% show version information and halt
@@ -223,9 +238,7 @@ show_info_maybe_halt(O, Opts, F) ->
     case proplists:get_bool(O, Opts) of
         true ->
             F(),
-            halt(0),
-            %% workaround to delay exit until all output is written
-            receive after infinity -> ok end;
+            rebar_utils:delayed_halt(0);
         false ->
             false
     end.
@@ -259,7 +272,7 @@ generate-upgrade  previous_release=path  Build an upgrade package
 generate-appups   previous_release=path  Generate appup files
 
 eunit       [suite=foo]              Run eunit [test/foo_tests.erl] tests
-ct          [suite=] [case=]         Run common_test suites in ./test
+ct          [suites=] [case=]        Run common_test suites in ./test
 
 xref                                 Run cross reference analysis
 
@@ -276,11 +289,12 @@ option_spec_list() ->
     JobsHelp = io_lib:format(
                  "Number of concurrent workers a command may use. Default: ~B",
                  [Jobs]),
+    VerboseHelp = "Verbosity level (-v, -vv, -vvv, --verbose 3). Default: 0",
     [
      %% {Name, ShortOpt, LongOpt, ArgSpec, HelpMsg}
      {help,     $h, "help",     undefined, "Show the program options"},
      {commands, $c, "commands", undefined, "Show available commands"},
-     {verbose,  $v, "verbose",  undefined, "Be verbose about what gets done"},
+     {verbose,  $v, "verbose",  integer,   VerboseHelp},
      {version,  $V, "version",  undefined, "Show version information"},
      {force,    $f, "force",    undefined, "Force"},
      {defines,  $D, undefined,  string,    "Define compiler macro"},
@@ -299,8 +313,14 @@ filter_flags([Item | Rest], Commands) ->
     case string:tokens(Item, "=") of
         [Command] ->
             filter_flags(Rest, [Command | Commands]);
-        [KeyStr, Value] ->
+        [KeyStr, RawValue] ->
             Key = list_to_atom(KeyStr),
+            Value = case Key of
+                        verbose ->
+                            list_to_integer(RawValue);
+                        _ ->
+                            RawValue
+                    end,
             rebar_config:set_global(Key, Value),
             filter_flags(Rest, Commands);
         Other ->

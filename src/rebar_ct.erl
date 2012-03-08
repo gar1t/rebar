@@ -32,7 +32,7 @@
 %%
 %% Global options:
 %% verbose=1 - show output from the common_test run as it goes
-%% suite="foo"" - runs <test>/foo_SUITE
+%% suites="foo,bar" - runs <test>/foo_SUITE and <test>/bar_SUITE
 %% case="mycase" - runs individual test case foo_SUITE:mycase
 %% -------------------------------------------------------------------
 -module(rebar_ct).
@@ -64,10 +64,10 @@ run_test_if_present(TestDir, Config, File) ->
 run_test(TestDir, Config, _File) ->
     {Cmd, RawLog} = make_cmd(TestDir, Config),
     clear_log(RawLog),
-    case rebar_config:get_global(verbose, "0") of
-        "0" ->
+    case rebar_config:is_verbose() of
+        false ->
             Output = " >> " ++ RawLog ++ " 2>&1";
-        _ ->
+        true ->
             Output = " 2>&1 | tee -a " ++ RawLog
     end,
 
@@ -106,17 +106,17 @@ check_log(RawLog) ->
             ?FAIL;
 
         true ->
-            ?CONSOLE("DONE. ~s\n", [Msg])
+            ?CONSOLE("DONE.\n~s\n", [Msg])
     end.
 
 %% Show the log if it hasn't already been shown because verbose was on
 show_log(RawLog) ->
     ?CONSOLE("Showing log\n", []),
-    case rebar_config:get_global(verbose, "0") of
-        "0" ->
+    case rebar_config:is_verbose() of
+        false ->
             {ok, Contents} = file:read_file(RawLog),
             ?CONSOLE("~s", [Contents]);
-        _ ->
+        true ->
             ok
     end.
 
@@ -243,18 +243,23 @@ get_config_file(TestDir) ->
     end.
 
 get_suite(TestDir) ->
-    case rebar_config:get_global(suite, undefined) of
+    case rebar_utils:get_deprecated_global(suite, suites, "soon") of
         undefined ->
             " -dir " ++ TestDir;
-        Suite ->
-            Filename = filename:join(TestDir, Suite ++ "_SUITE.erl"),
-            case filelib:is_regular(Filename) of
-                false ->
-                    ?ERROR("Suite ~s not found\n", [Suite]),
-                    ?FAIL;
-                true ->
-                    " -suite " ++ Filename
-            end
+        Suites ->
+            Suites1 = string:tokens(Suites, ","),
+            Suites2 = [find_suite_path(Suite, TestDir) || Suite <- Suites1],
+            string:join([" -suite"] ++ Suites2, " ")
+    end.
+
+find_suite_path(Suite, TestDir) ->
+    Path = filename:join(TestDir, Suite ++ "_SUITE.erl"),
+    case filelib:is_regular(Path) of
+        false ->
+            ?ERROR("Suite ~s not found\n", [Suite]),
+            ?FAIL;
+        true ->
+            Path
     end.
 
 get_case() ->

@@ -45,7 +45,7 @@
     TargetDir = rebar_rel_utils:get_target_dir(ReltoolConfig),
 
     OldVerPath = filename:join([TargetParentDir,
-                      rebar_rel_utils:get_previous_release_path()]),
+                                rebar_rel_utils:get_previous_release_path()]),
 
     %% Run checks to make sure that building a package is possible
     {NewVerPath, NewName, NewVer} = run_checks(OldVerPath, ReltoolConfig),
@@ -64,7 +64,7 @@
     {ok, _} = boot_files(TargetDir, NewVer, NewName),
 
     %% Extract upgrade and tar it back up with changes
-    make_tar(NameVer),
+    make_tar(NameVer, NewVer, NewName),
 
     %% Clean up files that systools created
     ok = cleanup(NameVer),
@@ -80,27 +80,36 @@
 
 run_checks(OldVerPath, ReltoolConfig) ->
     true = rebar_utils:prop_check(filelib:is_dir(OldVerPath),
-                      "Release directory doesn't exist (~p)~n", [OldVerPath]),
+                                  "Release directory doesn't exist (~p)~n",
+                                  [OldVerPath]),
 
     {Name, Ver} = rebar_rel_utils:get_reltool_release_info(ReltoolConfig),
 
-    NewVerPath = filename:join([
-                      rebar_rel_utils:get_target_parent_dir(ReltoolConfig),
-                      Name]),
+    NewVerPath =
+        filename:join([rebar_rel_utils:get_target_parent_dir(ReltoolConfig),
+                       Name]),
     true = rebar_utils:prop_check(filelib:is_dir(NewVerPath),
-                      "Release directory doesn't exist (~p)~n", [NewVerPath]),
+                                  "Release directory doesn't exist (~p)~n",
+                                  [NewVerPath]),
 
     {NewName, NewVer} = rebar_rel_utils:get_rel_release_info(Name, NewVerPath),
     {OldName, OldVer} = rebar_rel_utils:get_rel_release_info(Name, OldVerPath),
 
-    true = rebar_utils:prop_check(NewName == OldName,
-                      "New and old .rel release names do not match~n", []),
-    true = rebar_utils:prop_check(Name == NewName,
-                      "Reltool and .rel release names do not match~n", []),
-    true = rebar_utils:prop_check(NewVer =/= OldVer,
-                      "New and old .rel contain the same version~n", []),
-    true = rebar_utils:prop_check(Ver == NewVer,
-                      "Reltool and .rel versions do not match~n", []),
+    true =
+        rebar_utils:prop_check(NewName == OldName,
+                               "New and old .rel release names do not match~n",
+                               []),
+    true =
+        rebar_utils:prop_check(Name == NewName,
+                               "Reltool and .rel release names do not match~n",
+                               []),
+    true =
+        rebar_utils:prop_check(NewVer =/= OldVer,
+                               "New and old .rel contain the same version~n",
+                               []),
+    true =
+        rebar_utils:prop_check(Ver == NewVer,
+                               "Reltool and .rel versions do not match~n", []),
 
     {NewVerPath, NewName, NewVer}.
 
@@ -149,9 +158,14 @@ boot_files(TargetDir, Ver, Name) ->
     ok = file:make_dir(filename:join([".", ?TMP])),
     ok = file:make_dir(filename:join([".", ?TMP, "releases"])),
     ok = file:make_dir(filename:join([".", ?TMP, "releases", Ver])),
-    ok = file:make_symlink(
-           filename:join(["start.boot"]),
-           filename:join([".", ?TMP, "releases", Ver, Name ++ ".boot"])),
+    case os:type() of
+        {win32,_} ->
+            ok;
+        _ ->
+            ok = file:make_symlink(
+                   filename:join(["start.boot"]),
+                   filename:join([".", ?TMP, "releases", Ver, Name ++ ".boot"]))
+    end,
     {ok, _} =
         file:copy(
           filename:join([TargetDir, "releases", Ver, "start_clean.boot"]),
@@ -165,13 +179,23 @@ boot_files(TargetDir, Ver, Name) ->
                 filename:join([TargetDir, "releases", Ver, "vm.args"]),
                 filename:join([".", ?TMP, "releases", Ver, "vm.args"])).
 
-make_tar(NameVer) ->
+make_tar(NameVer, NewVer, NewName) ->
     Filename = NameVer ++ ".tar.gz",
     {ok, Cwd} = file:get_cwd(),
     Absname = filename:join([Cwd, Filename]),
     ok = file:set_cwd(?TMP),
     ok = erl_tar:extract(Absname, [compressed]),
     ok = file:delete(Absname),
+    case os:type() of
+        {win32,_} ->
+            {ok, _} =
+                file:copy(
+                  filename:join([".", "releases", NewVer, "start.boot"]),
+                  filename:join([".", "releases", NewVer, NewName ++ ".boot"])),
+            ok;
+        _ ->
+            ok
+    end,
     {ok, Tar} = erl_tar:open(Absname, [write, compressed]),
     ok = erl_tar:add(Tar, "lib", []),
     ok = erl_tar:add(Tar, "releases", []),

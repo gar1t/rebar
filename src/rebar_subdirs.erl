@@ -39,10 +39,18 @@ preprocess(Config, _) ->
     %% Get the list of subdirs specified in the config (if any).
     Cwd = rebar_utils:get_cwd(),
     Subdirs0 = rebar_config:get_local(Config, sub_dirs, []),
-    Check = check_loop(Cwd),
-    ok = lists:foreach(Check, Subdirs0),
-    Subdirs = [filename:join(Cwd, Dir) || Dir <- Subdirs0],
-    {ok, Subdirs}.
+    case {rebar_core:is_skip_dir(Cwd), Subdirs0} of
+        {true, []} ->
+            {ok, []};
+        {true, _} ->
+            ?WARN("Ignoring sub_dirs for ~s~n", [Cwd]),
+            {ok, []};
+        {false, _} ->
+            Check = check_loop(Cwd),
+            ok = lists:foreach(Check, Subdirs0),
+            Subdirs = [filename:join(Cwd, Dir) || Dir <- Subdirs0],
+            {ok, Subdirs}
+    end.
 
 %% ===================================================================
 %% Internal functions

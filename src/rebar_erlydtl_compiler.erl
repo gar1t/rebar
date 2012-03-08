@@ -82,12 +82,16 @@
 
 compile(Config, _AppFile) ->
     DtlOpts = erlydtl_opts(Config),
-    rebar_base_compiler:run(Config, [],
-                            option(doc_root, DtlOpts),
-                            option(source_ext, DtlOpts),
-                            option(out_dir, DtlOpts),
-                            option(module_ext, DtlOpts) ++ ".beam",
-                            fun compile_dtl/3, [{check_last_mod, false}]).
+    OrigPath = code:get_path(),
+    true = code:add_path(filename:join(rebar_utils:get_cwd(), "ebin")),
+    Result = rebar_base_compiler:run(Config, [],
+                                     option(doc_root, DtlOpts),
+                                     option(source_ext, DtlOpts),
+                                     option(out_dir, DtlOpts),
+                                     option(module_ext, DtlOpts) ++ ".beam",
+                                     fun compile_dtl/3, [{check_last_mod, false}]),
+    true = code:set_path(OrigPath),
+    Result.
 
 
 %% ===================================================================
@@ -109,7 +113,7 @@ default(custom_tags_dir) -> "".
 compile_dtl(Source, Target, Config) ->
     case code:which(erlydtl) of
         non_existing ->
-            ?CONSOLE(
+            ?ERROR(
                <<"~n===============================================~n"
                  " You need to install erlydtl to compile DTL templates~n"
                  " Download the latest tarball release from github~n"
@@ -140,8 +144,8 @@ do_compile(Source, Target, Config) ->
                          Opts++DtlOpts) of
         ok -> ok;
         Reason ->
-            ?CONSOLE("Compiling template ~s failed:~n  ~p~n",
-                     [Source, Reason]),
+            ?ERROR("Compiling template ~s failed:~n  ~p~n",
+                   [Source, Reason]),
             ?FAIL
     end.
 
@@ -157,7 +161,7 @@ needs_compile(Source, Target, Config) ->
 
 referenced_dtls(Source, Config) ->
     Set = referenced_dtls1([Source], Config,
-                          sets:add_element(Source, sets:new())),
+                           sets:add_element(Source, sets:new())),
     sets:to_list(sets:del_element(Source, Set)).
 
 referenced_dtls1(Step, Config, Seen) ->

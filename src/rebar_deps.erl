@@ -97,11 +97,17 @@ compile(Config, AppFile) ->
 setup_env(_Config) ->
     {true, DepsDir} = get_deps_dir(),
     %% include rebar's DepsDir in ERL_LIBS
+    Separator = case os:type() of
+                    {win32, nt} ->
+                        ";";
+                    _ ->
+                        ":"
+                end,
     ERL_LIBS = case os:getenv("ERL_LIBS") of
                    false ->
                        {"ERL_LIBS", DepsDir};
                    PrevValue ->
-                       {"ERL_LIBS", DepsDir ++ ":" ++ PrevValue}
+                       {"ERL_LIBS", DepsDir ++ Separator ++ PrevValue}
                end,
     [{"REBAR_DEPS_DIR", DepsDir}, ERL_LIBS].
 
@@ -223,14 +229,29 @@ find_deps(Mode, [App | Rest], Acc) when is_atom(App) ->
 find_deps(Mode, [{App, VsnRegex} | Rest], Acc) when is_atom(App) ->
     find_deps(Mode, [{App, VsnRegex, undefined} | Rest], Acc);
 find_deps(Mode, [{App, VsnRegex, Source} | Rest], Acc) ->
+    find_deps(Mode, [{App, VsnRegex, Source, []} | Rest], Acc);
+find_deps(Mode, [{App, VsnRegex, Source, Opts} | Rest], Acc) ->
     Dep = #dep { app = App,
                  vsn_regex = VsnRegex,
-                 source = Source },
+                 source = get_source(Source, Opts) },
     {Availability, FoundDir} = find_dep(Dep),
     find_deps(Mode, Rest, acc_deps(Mode, Availability, Dep, FoundDir, Acc));
 find_deps(_Mode, [Other | _Rest], _Acc) ->
     ?ABORT("Invalid dependency specification ~p in ~s\n",
            [Other, rebar_utils:get_cwd()]).
+
+get_source(undefined, _Opts) ->
+    undefined;
+get_source(Source, Opts) ->
+    setelement(2, Source, dep_url(element(2, Source), Opts)).
+
+dep_url(Url, Opts) ->
+    case rebar_config:get_global(alt_urls, "false") of
+        "true" ->
+            proplists:get_value(alt_url, Opts, Url);
+        "false" ->
+            Url
+    end.
 
 find_dep(Dep) ->
     %% Find a dep based on its source,
